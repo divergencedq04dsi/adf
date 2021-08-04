@@ -1,0 +1,16 @@
+{
+	"name": "InovicesVendorsLineItems",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "TransformationDatabase",
+			"type": "LinkedServiceReference"
+		},
+		"annotations": [],
+		"type": "AzureSqlTable",
+		"schema": [],
+		"typeProperties": {
+			"schema": "dbo",
+			"table": "InovicesVendorsLineItems"
+		}
+	}
+}
