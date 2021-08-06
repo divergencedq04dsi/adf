@@ -6,7 +6,7 @@
 			"sources": [
 				{
 					"dataset": {
-						"referenceName": "InvoiceData",
+						"referenceName": "DelimitedText1",
 						"type": "DatasetReference"
 					},
 					"name": "source1"
