@@ -1,0 +1,892 @@
+{
+	"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"factoryName": {
+			"type": "string",
+			"metadata": "Data Factory name",
+			"defaultValue": "adf-divergence-dq-transform"
+		}
+	},
+	"variables": {
+		"factoryId": "[concat('Microsoft.DataFactory/factories/', parameters('factoryName'))]"
+	},
+	"resources": [
+		{
+			"name": "[concat(parameters('factoryName'), '/DelimitedText1')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "InputBlob",
+					"type": "LinkedServiceReference"
+				},
+				"annotations": [],
+				"type": "DelimitedText",
+				"typeProperties": {
+					"location": {
+						"type": "AzureBlobStorageLocation",
+						"fileName": "Invoices2.csv",
+						"container": "input"
+					},
+					"columnDelimiter": ",",
+					"escapeChar": "\\",
+					"firstRowAsHeader": true,
+					"quoteChar": "\""
+				},
+				"schema": [
+					{
+						"name": "InvoiceID",
+						"type": "String"
+					},
+					{
+						"name": "VendorID",
+						"type": "String"
+					},
+					{
+						"name": "InvoiceNumber",
+						"type": "String"
+					},
+					{
+						"name": "InvoiceDate",
+						"type": "String"
+					},
+					{
+						"name": "InvoiceTotal",
+						"type": "String"
+					},
+					{
+						"name": "PaymentTotal",
+						"type": "String"
+					},
+					{
+						"name": "CreditTotal",
+						"type": "String"
+					},
+					{
+						"name": "TermsID",
+						"type": "String"
+					},
+					{
+						"name": "InvoiceDueDate",
+						"type": "String"
+					},
+					{
+						"name": "PaymentDate",
+						"type": "String"
+					}
+				]
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/DerivedColumn')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "InvoicesTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadInvoices"
+						},
+						{
+							"dataset": {
+								"referenceName": "VendorsTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadVendors"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "DerivedColumn",
+								"type": "DatasetReference"
+							},
+							"name": "DerivedColumn"
+						}
+					],
+					"transformations": [
+						{
+							"name": "JoinInvoicesVendors"
+						},
+						{
+							"name": "AddBalanceContactFullName"
+						},
+						{
+							"name": "Select1"
+						}
+					],
+					"script": "source(output(\n\t\tInvoiceID as integer,\n\t\tVendorID as integer,\n\t\tInvoiceNumber as string,\n\t\tInvoiceDate as date,\n\t\tInvoiceTotal as float,\n\t\tPaymentTotal as float,\n\t\tCreditTotal as float,\n\t\tTermsID as string,\n\t\tInvoiceDueDate as date,\n\t\tPaymentDate as date\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadInvoices\nsource(output(\n\t\tVendorID as integer,\n\t\tVendorName as string,\n\t\tVendorAddress1 as string,\n\t\tVendorAddress2 as string,\n\t\tVendorCity as string,\n\t\tVendorState as string,\n\t\tVendorZipCode as string,\n\t\tVendorPhone as string,\n\t\tVendorContactLName as string,\n\t\tVendorContactFName as string,\n\t\tDefaultTermsID as integer,\n\t\tDefaultAccountNo as string\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadVendors\nReadInvoices, ReadVendors join(ReadInvoices@VendorID == ReadVendors@VendorID,\n\tjoinType:'inner',\n\tbroadcast: 'auto')~> JoinInvoicesVendors\nJoinInvoicesVendors derive(OutstandingBalance = InvoiceTotal-PaymentTotal-CreditTotal,\n\t\tContactFullName = VendorContactLName + ', ' + VendorContactFName) ~> AddBalanceContactFullName\nAddBalanceContactFullName select(mapColumn(\n\t\tInvoiceID,\n\t\tVendorID = ReadInvoices@VendorID,\n\t\tInvoiceNumber,\n\t\tInvoiceDate,\n\t\tInvoiceTotal,\n\t\tPaymentTotal,\n\t\tCreditTotal,\n\t\tTermsID,\n\t\tInvoiceDueDate,\n\t\tPaymentDate,\n\t\tVendorName,\n\t\tOutstandingBalance,\n\t\tContactFullName\n\t),\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true) ~> Select1\nSelect1 sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> DerivedColumn"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ImportInvoiceLineItems')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "InvoiceLineItemsCSV",
+								"type": "DatasetReference"
+							},
+							"name": "ReadInvoiceLineItems"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "InvoiceLineItemsTable",
+								"type": "DatasetReference"
+							},
+							"name": "WriteInvoiceLineItems"
+						}
+					],
+					"transformations": [],
+					"script": "source(output(\n\t\tInvoiceID as integer,\n\t\tInvoiceSequence as integer,\n\t\tAccountNo as integer,\n\t\tInvoiceLineItemAmount as float,\n\t\tInvoiceLineItemDescription as string\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tignoreNoFilesFound: false) ~> ReadInvoiceLineItems\nReadInvoiceLineItems sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> WriteInvoiceLineItems"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ImportInvoices')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "InvoiceData",
+								"type": "DatasetReference"
+							},
+							"name": "ReadInvoiceData"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "InvoicesTable",
+								"type": "DatasetReference"
+							},
+							"name": "ImportInvoiceData"
+						}
+					],
+					"transformations": [],
+					"script": "source(output(\n\t\tInvoiceID as integer,\n\t\tVendorID as integer,\n\t\tInvoiceNumber as string,\n\t\tInvoiceDate as date 'MM/dd/yyyy',\n\t\tInvoiceTotal as float,\n\t\tPaymentTotal as float,\n\t\tCreditTotal as float,\n\t\tTermsID as string,\n\t\tInvoiceDueDate as date 'MM/dd/yyyy',\n\t\tPaymentDate as date 'MM/dd/yyyy'\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tignoreNoFilesFound: false) ~> ReadInvoiceData\nReadInvoiceData sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\ttruncate:true,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> ImportInvoiceData"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ImportVendors')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "VendorsCSV",
+								"type": "DatasetReference"
+							},
+							"name": "ReadVendors"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "VendorsTable",
+								"type": "DatasetReference"
+							},
+							"name": "WriteVendors"
+						}
+					],
+					"transformations": [],
+					"script": "source(output(\n\t\tVendorID as integer,\n\t\tVendorName as string,\n\t\tVendorAddress1 as string,\n\t\tVendorAddress2 as string,\n\t\tVendorCity as string,\n\t\tVendorState as string,\n\t\tVendorZipCode as string,\n\t\tVendorPhone as string,\n\t\tVendorContactLName as string,\n\t\tVendorContactFName as string,\n\t\tDefaultTermsID as integer,\n\t\tDefaultAccountNo as string\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tignoreNoFilesFound: false) ~> ReadVendors\nReadVendors sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> WriteVendors"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/JoinInvoiceVendorsLineItems')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "InvoicesTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadInvoicesTable"
+						},
+						{
+							"dataset": {
+								"referenceName": "VendorsTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadVendorsTable"
+						},
+						{
+							"dataset": {
+								"referenceName": "InvoiceLineItemsTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadInvoiceLineItemsTable"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "InovicesVendorsLineItems",
+								"type": "DatasetReference"
+							},
+							"name": "WriteJoinResults"
+						}
+					],
+					"transformations": [
+						{
+							"name": "JoinInvoicesVendors"
+						},
+						{
+							"name": "JoinInvoicesLineItems"
+						}
+					],
+					"script": "source(output(\n\t\tInvoiceID as integer,\n\t\tVendorID as integer,\n\t\tInvoiceNumber as string,\n\t\tInvoiceDate as date,\n\t\tInvoiceTotal as float,\n\t\tPaymentTotal as float,\n\t\tCreditTotal as float,\n\t\tTermsID as string,\n\t\tInvoiceDueDate as date,\n\t\tPaymentDate as date\n\t),\n\tallowSchemaDrift: false,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadInvoicesTable\nsource(output(\n\t\tVendorID as integer,\n\t\tVendorName as string,\n\t\tVendorAddress1 as string,\n\t\tVendorAddress2 as string,\n\t\tVendorCity as string,\n\t\tVendorState as string,\n\t\tVendorZipCode as string,\n\t\tVendorPhone as string,\n\t\tVendorContactLName as string,\n\t\tVendorContactFName as string,\n\t\tDefaultTermsID as integer,\n\t\tDefaultAccountNo as string\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadVendorsTable\nsource(output(\n\t\tInvoiceID as integer,\n\t\tInvoiceSequence as integer,\n\t\tAccountNo as integer,\n\t\tInvoiceLineItemAmount as float,\n\t\tInvoiceLineItemDescription as string\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadInvoiceLineItemsTable\nReadInvoicesTable, ReadVendorsTable join(ReadInvoicesTable@VendorID == ReadVendorsTable@VendorID,\n\tjoinType:'inner',\n\tbroadcast: 'auto')~> JoinInvoicesVendors\nJoinInvoicesVendors, ReadInvoiceLineItemsTable join(ReadInvoicesTable@InvoiceID == ReadInvoiceLineItemsTable@InvoiceID,\n\tjoinType:'inner',\n\tbroadcast: 'auto')~> JoinInvoicesLineItems\nJoinInvoicesLineItems sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> WriteJoinResults"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/PivotUnPivot')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "InvoicesTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadInvoices"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "VendorTermsSummary",
+								"type": "DatasetReference"
+							},
+							"name": "WriteResults"
+						}
+					],
+					"transformations": [
+						{
+							"name": "Pivot"
+						},
+						{
+							"name": "Unpivot"
+						}
+					],
+					"script": "source(output(\n\t\tInvoiceID as integer,\n\t\tVendorID as integer,\n\t\tInvoiceNumber as string,\n\t\tInvoiceDate as date,\n\t\tInvoiceTotal as float,\n\t\tPaymentTotal as float,\n\t\tCreditTotal as float,\n\t\tTermsID as string,\n\t\tInvoiceDueDate as date,\n\t\tPaymentDate as date\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadInvoices\nReadInvoices pivot(groupBy(VendorID),\n\tpivotBy(TermsID),\n\t{} = sum(InvoiceTotal),\n\tcolumnNaming: '$N$V',\n\tlateral: true) ~> Pivot\nPivot unpivot(output(\n\t\tTermsID as integer,\n\t\tGrandInvoiceTotal as double\n\t),\n\tungroupBy(VendorID),\n\tlateral: true,\n\tignoreNullPivots: false) ~> Unpivot\nUnpivot sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> WriteResults"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/SplitInvoices')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "InvoicesTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadInvoiceTable"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "PaidIvnocies",
+								"type": "DatasetReference"
+							},
+							"name": "WritePaidInvoices"
+						},
+						{
+							"dataset": {
+								"referenceName": "UnpaidInvoices",
+								"type": "DatasetReference"
+							},
+							"name": "WriteUnpaidInvoices"
+						}
+					],
+					"transformations": [
+						{
+							"name": "SplitInvoices"
+						}
+					],
+					"script": "source(output(\n\t\tInvoiceID as integer,\n\t\tVendorID as integer,\n\t\tInvoiceNumber as string,\n\t\tInvoiceDate as date,\n\t\tInvoiceTotal as float,\n\t\tPaymentTotal as float,\n\t\tCreditTotal as float,\n\t\tTermsID as string,\n\t\tInvoiceDueDate as date,\n\t\tPaymentDate as date\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadInvoiceTable\nReadInvoiceTable split(InvoiceTotal-PaymentTotal-CreditTotal==0,\n\tdisjoint: false) ~> SplitInvoices@(PaidInvoices, UnpaidInvoices)\nSplitInvoices@PaidInvoices sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> WritePaidInvoices\nSplitInvoices@UnpaidInvoices sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> WriteUnpaidInvoices"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/Top3InvoicesForVendors')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "InvoicesTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadInvoices"
+						},
+						{
+							"dataset": {
+								"referenceName": "VendorsTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadVendors"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "Top3InvoicesForVendor",
+								"type": "DatasetReference"
+							},
+							"name": "WriteResults"
+						}
+					],
+					"transformations": [
+						{
+							"name": "RankInvoicesForVendors"
+						},
+						{
+							"name": "JoinInvoicesVendors"
+						},
+						{
+							"name": "FilterForTop3Invoices"
+						},
+						{
+							"name": "Select"
+						}
+					],
+					"script": "source(output(\n\t\tInvoiceID as integer,\n\t\tVendorID as integer,\n\t\tInvoiceNumber as string,\n\t\tInvoiceDate as date,\n\t\tInvoiceTotal as float,\n\t\tPaymentTotal as float,\n\t\tCreditTotal as float,\n\t\tTermsID as string,\n\t\tInvoiceDueDate as date,\n\t\tPaymentDate as date\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadInvoices\nsource(output(\n\t\tVendorID as integer,\n\t\tVendorName as string,\n\t\tVendorAddress1 as string,\n\t\tVendorAddress2 as string,\n\t\tVendorCity as string,\n\t\tVendorState as string,\n\t\tVendorZipCode as string,\n\t\tVendorPhone as string,\n\t\tVendorContactLName as string,\n\t\tVendorContactFName as string,\n\t\tDefaultTermsID as integer,\n\t\tDefaultAccountNo as string\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadVendors\nJoinInvoicesVendors window(over(VendorName),\n\tdesc(InvoiceTotal, true),\n\tRank = rank()) ~> RankInvoicesForVendors\nReadInvoices, ReadVendors join(ReadInvoices@VendorID == ReadVendors@VendorID,\n\tjoinType:'inner',\n\tbroadcast: 'auto')~> JoinInvoicesVendors\nSelect filter(Rank<=3) ~> FilterForTop3Invoices\nRankInvoicesForVendors select(mapColumn(\n\t\tInvoiceID,\n\t\tInvoiceTotal,\n\t\tVendorName,\n\t\tRank\n\t),\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true) ~> Select\nFilterForTop3Invoices sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> WriteResults"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/UnionInvoices')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "InvoicesTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadInvoices"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "UnionInvoices",
+								"type": "DatasetReference"
+							},
+							"name": "WriteResults"
+						}
+					],
+					"transformations": [
+						{
+							"name": "SplitPaidUnpaid"
+						},
+						{
+							"name": "AddPaidSourceColumn"
+						},
+						{
+							"name": "AddUnpaidSourceColumn"
+						},
+						{
+							"name": "UnionInvoices"
+						}
+					],
+					"script": "source(output(\n\t\tInvoiceID as integer,\n\t\tVendorID as integer,\n\t\tInvoiceNumber as string,\n\t\tInvoiceDate as date,\n\t\tInvoiceTotal as float,\n\t\tPaymentTotal as float,\n\t\tCreditTotal as float,\n\t\tTermsID as string,\n\t\tInvoiceDueDate as date,\n\t\tPaymentDate as date\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadInvoices\nReadInvoices split(InvoiceTotal-PaymentTotal-CreditTotal==0,\n\tdisjoint: false) ~> SplitPaidUnpaid@(Paid, Unpaid)\nSplitPaidUnpaid@Paid derive(Source = 'Paid') ~> AddPaidSourceColumn\nSplitPaidUnpaid@Unpaid derive(Source = 'Unpaid') ~> AddUnpaidSourceColumn\nAddPaidSourceColumn, AddUnpaidSourceColumn union(byName: true)~> UnionInvoices\nUnionInvoices sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> WriteResults"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/VendorStateAggregate')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "InvoicesTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadInvoices"
+						},
+						{
+							"dataset": {
+								"referenceName": "VendorsTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadVendors"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "VendorSummary",
+								"type": "DatasetReference"
+							},
+							"name": "WriteVendorSummary"
+						},
+						{
+							"dataset": {
+								"referenceName": "StateSummary",
+								"type": "DatasetReference"
+							},
+							"name": "WriteStateSummary"
+						}
+					],
+					"transformations": [
+						{
+							"name": "JoinInvoicesVendors"
+						},
+						{
+							"name": "VendorSummary"
+						},
+						{
+							"name": "StateSummary"
+						}
+					],
+					"script": "source(output(\n\t\tInvoiceID as integer,\n\t\tVendorID as integer,\n\t\tInvoiceNumber as string,\n\t\tInvoiceDate as date,\n\t\tInvoiceTotal as float,\n\t\tPaymentTotal as float,\n\t\tCreditTotal as float,\n\t\tTermsID as string,\n\t\tInvoiceDueDate as date,\n\t\tPaymentDate as date\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadInvoices\nsource(output(\n\t\tVendorID as integer,\n\t\tVendorName as string,\n\t\tVendorAddress1 as string,\n\t\tVendorAddress2 as string,\n\t\tVendorCity as string,\n\t\tVendorState as string,\n\t\tVendorZipCode as string,\n\t\tVendorPhone as string,\n\t\tVendorContactLName as string,\n\t\tVendorContactFName as string,\n\t\tDefaultTermsID as integer,\n\t\tDefaultAccountNo as string\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadVendors\nReadInvoices, ReadVendors join(ReadInvoices@VendorID == ReadVendors@VendorID,\n\tjoinType:'inner',\n\tbroadcast: 'auto')~> JoinInvoicesVendors\nJoinInvoicesVendors aggregate(groupBy(VendorName),\n\tNumberOfInvoices = count(InvoiceID),\n\t\tMinInvoiceAmount = min(InvoiceTotal),\n\t\tMaxInvoiceAmount = max(InvoiceTotal),\n\t\tAverageInvoiceAmount = round(avg(InvoiceTotal), 2)) ~> VendorSummary\nJoinInvoicesVendors aggregate(groupBy(VendorState),\n\tNumberOfInvoices = count(InvoiceID),\n\t\tMinInvoiceTotal = min(InvoiceTotal),\n\t\tMaxInvoiceTotal = max(InvoiceTotal),\n\t\tAverageInvoiceTotal = round(avg(InvoiceTotal), 2)) ~> StateSummary\nVendorSummary sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> WriteVendorSummary\nStateSummary sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> WriteStateSummary"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/VendorsWithoutInvoice')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "VendorsTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadVendors"
+						},
+						{
+							"dataset": {
+								"referenceName": "InvoicesTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadInvoices"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "VendorsWithoutInvoices",
+								"type": "DatasetReference"
+							},
+							"name": "WriteVendorsWithoutInvoices"
+						}
+					],
+					"transformations": [
+						{
+							"name": "LeftJoinWithInvoices"
+						},
+						{
+							"name": "FilterOnEmptyInvoices"
+						}
+					],
+					"script": "source(output(\n\t\tVendorID as integer,\n\t\tVendorName as string,\n\t\tVendorAddress1 as string,\n\t\tVendorAddress2 as string,\n\t\tVendorCity as string,\n\t\tVendorState as string,\n\t\tVendorZipCode as string,\n\t\tVendorPhone as string,\n\t\tVendorContactLName as string,\n\t\tVendorContactFName as string,\n\t\tDefaultTermsID as integer,\n\t\tDefaultAccountNo as string\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadVendors\nsource(output(\n\t\tInvoiceID as integer,\n\t\tVendorID as integer,\n\t\tInvoiceNumber as string,\n\t\tInvoiceDate as date,\n\t\tInvoiceTotal as float,\n\t\tPaymentTotal as float,\n\t\tCreditTotal as float,\n\t\tTermsID as string,\n\t\tInvoiceDueDate as date,\n\t\tPaymentDate as date\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadInvoices\nReadVendors, ReadInvoices join(ReadVendors@VendorID == ReadInvoices@VendorID,\n\tjoinType:'left',\n\tbroadcast: 'auto')~> LeftJoinWithInvoices\nLeftJoinWithInvoices filter(isNull(InvoiceID)) ~> FilterOnEmptyInvoices\nFilterOnEmptyInvoices sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> WriteVendorsWithoutInvoices"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/VendorsWithoutInvoiceExist')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "VendorsTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadVendors"
+						},
+						{
+							"dataset": {
+								"referenceName": "InvoicesTable",
+								"type": "DatasetReference"
+							},
+							"name": "ReadInvoices"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "VendorsWithoutInvoicesExist",
+								"type": "DatasetReference"
+							},
+							"name": "WriteResults"
+						}
+					],
+					"transformations": [
+						{
+							"name": "VendorsWithoutInvoices"
+						}
+					],
+					"script": "source(output(\n\t\tVendorID as integer,\n\t\tVendorName as string,\n\t\tVendorAddress1 as string,\n\t\tVendorAddress2 as string,\n\t\tVendorCity as string,\n\t\tVendorState as string,\n\t\tVendorZipCode as string,\n\t\tVendorPhone as string,\n\t\tVendorContactLName as string,\n\t\tVendorContactFName as string,\n\t\tDefaultTermsID as integer,\n\t\tDefaultAccountNo as string\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadVendors\nsource(output(\n\t\tInvoiceID as integer,\n\t\tVendorID as integer,\n\t\tInvoiceNumber as string,\n\t\tInvoiceDate as date,\n\t\tInvoiceTotal as float,\n\t\tPaymentTotal as float,\n\t\tCreditTotal as float,\n\t\tTermsID as string,\n\t\tInvoiceDueDate as date,\n\t\tPaymentDate as date\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> ReadInvoices\nReadVendors, ReadInvoices exists(ReadVendors@VendorID == ReadInvoices@VendorID,\n\tnegate:true,\n\tbroadcast: 'auto')~> VendorsWithoutInvoices\nVendorsWithoutInvoices sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:false,\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> WriteResults"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/dataflow1')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "InvoiceData",
+								"type": "DatasetReference"
+							},
+							"name": "source1"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "AzureSqlTable1",
+								"type": "DatasetReference"
+							},
+							"name": "sink1"
+						}
+					],
+					"transformations": [
+						{
+							"name": "AlterRow1"
+						},
+						{
+							"name": "DerivedColumn1"
+						}
+					],
+					"script": "source(output(\n\t\tInvoiceID as string,\n\t\tVendorID as string,\n\t\tInvoiceNumber as string,\n\t\tInvoiceDate as string,\n\t\tInvoiceTotal as string,\n\t\tPaymentTotal as string,\n\t\tCreditTotal as string,\n\t\tTermsID as string,\n\t\tInvoiceDueDate as string,\n\t\tPaymentDate as string\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tignoreNoFilesFound: false) ~> source1\nDerivedColumn1 alterRow(upsertIf(true())) ~> AlterRow1\nsource1 derive(LastUpdatedDateTime = fromUTC(currentUTC(), 'America/Chicago')) ~> DerivedColumn1\nAlterRow1 sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:false,\n\tupdateable:false,\n\tupsertable:true,\n\tkeys:['InvoiceID'],\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> sink1"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/DerivedColumn')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "DerivedColumn",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "1.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "DerivedColumn",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"ReadInvoices": {},
+									"ReadVendors": {},
+									"DerivedColumn": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					}
+				],
+				"annotations": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/dataflows/DerivedColumn')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/Import Invoices')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "Import Raw Data",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "1.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "ImportInvoices",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"ReadInvoiceData": {},
+									"ImportInvoiceData": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					}
+				],
+				"annotations": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/dataflows/ImportInvoices')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/Import Vendors')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "Import Vendors",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "1.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "ImportVendors",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"ReadVendors": {},
+									"WriteVendors": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					}
+				],
+				"annotations": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/dataflows/ImportVendors')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ImportInvoiceLineItems')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "ImportInvoiceLineItems",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "1.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "ImportInvoiceLineItems",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"ReadInvoiceLineItems": {},
+									"WriteInvoiceLineItems": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					}
+				],
+				"annotations": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/dataflows/ImportInvoiceLineItems')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/JoinInvoiceVendorsLineItems')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "JoinInvoiceVendorsLineItems",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "1.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "JoinInvoiceVendorsLineItems",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"ReadInvoicesTable": {},
+									"ReadVendorsTable": {},
+									"ReadInvoiceLineItemsTable": {},
+									"WriteJoinResults": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					}
+				],
+				"annotations": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/dataflows/JoinInvoiceVendorsLineItems')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/PivotUnPivot')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "PivotUnPivot",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "1.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "PivotUnPivot",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"ReadInvoices": {},
+									"WriteResults": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					}
+				],
+				"annotations": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/dataflows/PivotUnPivot')]"
+			]
+		}
+	]
+}
