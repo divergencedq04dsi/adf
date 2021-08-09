@@ -1,0 +1,24 @@
+{
+	"name": "OnInvoiceFileArrival",
+	"properties": {
+		"annotations": [],
+		"runtimeState": "Started",
+		"pipelines": [
+			{
+				"pipelineReference": {
+					"referenceName": "LoopFiles",
+					"type": "PipelineReference"
+				}
+			}
+		],
+		"type": "BlobEventsTrigger",
+		"typeProperties": {
+			"blobPathBeginsWith": "/input/blobs/",
+			"ignoreEmptyBlobs": true,
+			"scope": "/subscriptions/3a6713ad-fb61-40a1-8a95-cc80075db0ac/resourceGroups/rg-divergence-dq-dynamic/providers/Microsoft.Storage/storageAccounts/sadivergencedqdynamic",
+			"events": [
+				"Microsoft.Storage.BlobCreated"
+			]
+		}
+	}
+}
