@@ -75,6 +75,17 @@
 										"type": "DelimitedTextReadSettings"
 									}
 								},
+								"sink": {
+									"type": "DelimitedTextSink",
+									"storeSettings": {
+										"type": "AzureBlobStorageWriteSettings"
+									},
+									"formatSettings": {
+										"type": "DelimitedTextWriteSettings",
+										"quoteAllText": true,
+										"fileExtension": ".txt"
+									}
+								},
 								"enableStaging": false
 							},
 							"inputs": [
@@ -87,6 +98,12 @@
 											"type": "Expression"
 										}
 									}
+								}
+							],
+							"outputs": [
+								{
+									"referenceName": "ArchiveInvoiceFile",
+									"type": "DatasetReference"
 								}
 							]
 						}
