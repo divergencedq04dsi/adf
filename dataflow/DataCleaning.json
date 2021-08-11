@@ -13,8 +13,24 @@
 				}
 			],
 			"sinks": [],
-			"transformations": [],
-			"script": "source(output(\n\t\tid as integer,\n\t\tname as string,\n\t\thost_id as integer,\n\t\thost_name as string,\n\t\tneighbourhood_group as string,\n\t\tneighbourhood as string,\n\t\tlatitude as double,\n\t\tlongitude as double,\n\t\troom_type as string,\n\t\tprice as float,\n\t\tminimum_nights as integer,\n\t\tnumber_of_reviews as integer,\n\t\tlast_review as date 'MM/dd/yyyy',\n\t\treviews_per_month as float,\n\t\tcalculated_host_listings_count as integer,\n\t\tavailability_365 as integer\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tignoreNoFilesFound: false) ~> ReadAirbnbData"
+			"transformations": [
+				{
+					"name": "CleanNameHostNameNeighborRoomType"
+				},
+				{
+					"name": "RowCountForId"
+				},
+				{
+					"name": "GetDuplicates"
+				},
+				{
+					"name": "JoinRawColumns"
+				},
+				{
+					"name": "AppendDuplicateDataIssue"
+				}
+			],
+			"script": "source(output(\n\t\tid as integer,\n\t\tname as string,\n\t\thost_id as integer,\n\t\thost_name as string,\n\t\tneighbourhood_group as string,\n\t\tneighbourhood as string,\n\t\tlatitude as double,\n\t\tlongitude as double,\n\t\troom_type as string,\n\t\tprice as float,\n\t\tminimum_nights as integer,\n\t\tnumber_of_reviews as integer,\n\t\tlast_review as date 'MM/dd/yyyy',\n\t\treviews_per_month as float,\n\t\tcalculated_host_listings_count as integer,\n\t\tavailability_365 as integer\n\t),\n\tallowSchemaDrift: true,\n\tvalidateSchema: false,\n\tignoreNoFilesFound: false) ~> ReadAirbnbData\nReadAirbnbData derive(name_clean = regexReplace(name, '[^A-Za-z0-9 ]|(  +)', ''),\n\t\thost_name_clean = regexReplace(name, '[^A-Za-z ]|(  +)', ''),\n\t\tneighborhood_clean = regexReplace(neighbourhood, '[^A-Za-z0-9 ]|(  +)', ''),\n\t\troom_type_clean = regexReplace(room_type, '[^A-Za-z0-9 ]|(  +)', '')) ~> CleanNameHostNameNeighborRoomType\nCleanNameHostNameNeighborRoomType aggregate(groupBy(id),\n\tCount = count(id)) ~> RowCountForId\nRowCountForId filter(Count>1) ~> GetDuplicates\nGetDuplicates, ReadAirbnbData join(RowCountForId@id == ReadAirbnbData@id,\n\tjoinType:'inner',\n\tbroadcast: 'auto')~> JoinRawColumns\nJoinRawColumns derive(issue = concat('duplicates. (', toString(Count), ') times')) ~> AppendDuplicateDataIssue"
 		}
 	}
 }
